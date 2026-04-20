@@ -63,7 +63,7 @@ export function Hero() {
             <div className="relative">
               <div className="w-full h-[480px] rounded-2xl overflow-hidden">
                 <Image
-                  src="/imagenes/SW-RENDER.jpg"
+                  src="/Imagenes/SW-RENDER.jpg"
                   alt="Sherwin Williams - MAPEX"
                   width={560}
                   height={480}
@@ -74,7 +74,7 @@ export function Hero() {
 
               {/* Floating card - SW */}
               <div className="absolute -bottom-6 -left-8 bg-white rounded-2xl p-4 shadow-2xl w-48">
-                <Image src="/imagenes/SW-LOGO.png" alt="Sherwin Williams" width={72} height={36} className="absolute -top-20 -right-4 object-contain drop-shadow-md" />
+                <Image src="/Imagenes/SW-LOGO.png" alt="Sherwin Williams" width={72} height={36} className="absolute -top-20 -right-4 object-contain drop-shadow-md" />
                 <div className="flex items-center gap-3">
                   <div>
                     <p className="text-xs font-bold text-gray-900">Sherwin Williams</p>
