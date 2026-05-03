@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Plus, Search, Edit, Trash2, Package, Eye, EyeOff, Star, Upload } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Package, Eye, EyeOff, Star, Upload, CheckSquare } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Product } from '@/types';
 import { formatCurrency } from '@/lib/utils';
@@ -14,6 +14,8 @@ export default function AdminProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkLoading, setBulkLoading] = useState(false);
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -52,6 +54,43 @@ export default function AdminProductsPage() {
     await supabase.from('products').update({ is_featured: !current }).eq('id', id);
     setProducts(prev => prev.map(p => p.id === id ? { ...p, is_featured: !current } : p));
     showToast(`Producto ${!current ? 'marcado como' : 'removido de'} destacados`, 'success');
+  };
+
+  const allFilteredSelected = filteredProducts.length > 0 && filteredProducts.every(p => selected.has(p.id));
+
+  const toggleSelect = (id: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (allFilteredSelected) {
+      setSelected(prev => {
+        const next = new Set(prev);
+        filteredProducts.forEach(p => next.delete(p.id));
+        return next;
+      });
+    } else {
+      setSelected(prev => {
+        const next = new Set(prev);
+        filteredProducts.forEach(p => next.add(p.id));
+        return next;
+      });
+    }
+  };
+
+  const bulkSetActive = async (active: boolean) => {
+    const ids = [...selected];
+    setBulkLoading(true);
+    const supabase = createClient();
+    await supabase.from('products').update({ is_active: active }).in('id', ids);
+    setProducts(prev => prev.map(p => selected.has(p.id) ? { ...p, is_active: active } : p));
+    setSelected(new Set());
+    setBulkLoading(false);
+    showToast(`${ids.length} producto(s) ${active ? 'activados' : 'desactivados'}`, 'success');
   };
 
   const deleteProduct = async (id: string, name: string) => {
@@ -95,6 +134,34 @@ export default function AdminProductsPage() {
         />
       </div>
 
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div className="flex items-center gap-3 mb-4 bg-[#E8462A] text-white px-5 py-3 rounded-2xl">
+          <CheckSquare className="h-4 w-4 flex-shrink-0" />
+          <span className="text-sm font-bold flex-1">{selected.size} producto(s) seleccionado(s)</span>
+          <button
+            onClick={() => bulkSetActive(true)}
+            disabled={bulkLoading}
+            className="text-sm font-bold bg-white text-green-700 px-3 py-1.5 rounded-xl hover:bg-green-50 transition-colors disabled:opacity-50"
+          >
+            Activar
+          </button>
+          <button
+            onClick={() => bulkSetActive(false)}
+            disabled={bulkLoading}
+            className="text-sm font-bold bg-white text-gray-700 px-3 py-1.5 rounded-xl hover:bg-gray-50 transition-colors disabled:opacity-50"
+          >
+            Desactivar
+          </button>
+          <button
+            onClick={() => setSelected(new Set())}
+            className="text-sm text-white/70 hover:text-white transition-colors"
+          >
+            Cancelar
+          </button>
+        </div>
+      )}
+
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
         {loading ? (
           <div className="p-10 text-center text-gray-400">
@@ -113,6 +180,14 @@ export default function AdminProductsPage() {
             <table className="w-full">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100">
+                  <th className="px-4 py-3 w-8">
+                    <input
+                      type="checkbox"
+                      checked={allFilteredSelected}
+                      onChange={toggleSelectAll}
+                      className="h-4 w-4 rounded border-gray-300 accent-[#E8462A] cursor-pointer"
+                    />
+                  </th>
                   {['Producto', 'Categoría', 'Precio base', 'Variantes', 'Estado', 'Acciones'].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">{h}</th>
                   ))}
@@ -122,7 +197,15 @@ export default function AdminProductsPage() {
                 {filteredProducts.map((product) => {
                   const stock = product.variants?.reduce((s, v) => s + (v.stock || 0), 0) ?? 0;
                   return (
-                    <tr key={product.id} className="hover:bg-gray-50 transition-colors">
+                    <tr key={product.id} className={`transition-colors ${selected.has(product.id) ? 'bg-orange-50' : 'hover:bg-gray-50'}`}>
+                      <td className="px-4 py-3 w-8">
+                        <input
+                          type="checkbox"
+                          checked={selected.has(product.id)}
+                          onChange={() => toggleSelect(product.id)}
+                          className="h-4 w-4 rounded border-gray-300 accent-[#E8462A] cursor-pointer"
+                        />
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
                           <div className="h-12 w-12 bg-gray-100 rounded-xl overflow-hidden flex-shrink-0">

@@ -72,6 +72,41 @@ function normalizeKey(key: string): string {
   return key.toLowerCase().trim().replace(/\s+/g, '_').replace(/[áàä]/g, 'a').replace(/[éèë]/g, 'e').replace(/[íìï]/g, 'i').replace(/[óòö]/g, 'o').replace(/[úùü]/g, 'u').replace(/ñ/g, 'n');
 }
 
+const FINISH_MAP: Record<string, string> = {
+  flat: 'flat', plano: 'flat', mate: 'flat', 'sin brillo': 'flat',
+  matte: 'matte', mate2: 'matte',
+  eggshell: 'eggshell', 'cascara de huevo': 'eggshell', 'cáscara de huevo': 'eggshell', 'cascara': 'eggshell',
+  satin: 'satin', satinado: 'satin', satín: 'satin',
+  'semi-gloss': 'semi-gloss', semigloss: 'semi-gloss', semibrill: 'semi-gloss', 'semi brillante': 'semi-gloss', semibrillante: 'semi-gloss',
+  gloss: 'gloss', brillante: 'gloss', brillo: 'gloss',
+  'high-gloss': 'high-gloss', highgloss: 'high-gloss', 'alto brillo': 'high-gloss', altobrillo: 'high-gloss',
+};
+
+function normalizeFinish(raw: string | undefined): string | null {
+  if (!raw) return null;
+  return FINISH_MAP[raw.toLowerCase().trim()] ?? null;
+}
+
+const VALID_BASE_TYPES = ['water', 'oil', 'epoxy', 'latex', 'acrylic'] as const;
+const BASE_TYPE_MAP: Record<string, string> = {
+  water: 'water', agua: 'water', 'al agua': 'water',
+  oil: 'oil', aceite: 'oil', 'al aceite': 'oil', oleo: 'oil', óleo: 'oil',
+  epoxy: 'epoxy', epoxi: 'epoxy', epóxi: 'epoxy',
+  latex: 'latex', látex: 'latex', latx: 'latex',
+  acrylic: 'acrylic', acrilico: 'acrylic', acrílico: 'acrylic', acrilica: 'acrylic', acrílica: 'acrylic',
+};
+
+function normalizeBaseType(raw: string | undefined): { value: string | null; warning: string | null } {
+  if (!raw) return { value: null, warning: null };
+  const key = raw.toLowerCase().trim();
+  const mapped = BASE_TYPE_MAP[key];
+  if (mapped) return { value: mapped, warning: null };
+  return {
+    value: null,
+    warning: `Tipo de base "${raw}" no reconocido — se ignorará. Valores válidos: ${VALID_BASE_TYPES.join(', ')}`,
+  };
+}
+
 function parseRow(raw: RawRow, categories: Category[], brands: Brand[]): { parsed: ParsedProduct | null; errors: string[] } {
   const errors: string[] = [];
   const mapped: Record<string, string> = {};
@@ -140,8 +175,8 @@ function parseRow(raw: RawRow, categories: Category[], brands: Brand[]): { parse
       base_price,
       category_name: catName,
       brand_name: brandName,
-      finish: mapped['finish'] || null,
-      base_type: mapped['base_type'] || null,
+      finish: normalizeFinish(mapped['finish']),
+      base_type: normalizeBaseType(mapped['base_type']).value,
       coverage_sqm_per_liter: mapped['coverage_sqm_per_liter'] ? parseFloat(mapped['coverage_sqm_per_liter']) : null,
       dry_time_hours: mapped['dry_time_hours'] ? parseFloat(mapped['dry_time_hours']) : null,
       coats_required: mapped['coats_required'] ? parseInt(mapped['coats_required']) : null,
@@ -182,24 +217,34 @@ export default function CargaMasivaPage() {
       return;
     }
 
-    Papa.parse<RawRow>(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        if (results.data.length === 0) {
-          showToast('El archivo CSV está vacío', 'error');
-          return;
-        }
-        const parsed = results.data.map((raw) => {
-          const { parsed, errors } = parseRow(raw, categories, brands);
-          return { raw, parsed, errors: errors.filter(e => !e.includes('no encontrada')), status: 'pending' as const, errorMsg: undefined };
-        });
-        setRows(parsed);
-        setUploadedCount(0);
-        showToast(`${parsed.length} filas cargadas`, 'success');
-      },
-      error: () => showToast('Error al leer el archivo CSV', 'error'),
-    });
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const buffer = e.target?.result as ArrayBuffer;
+      // Try UTF-8 first; if replacement chars appear, fall back to Windows-1252
+      let text = new TextDecoder('utf-8').decode(buffer);
+      if (text.includes('�')) {
+        text = new TextDecoder('windows-1252').decode(buffer);
+      }
+      Papa.parse<RawRow>(text, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          if (results.data.length === 0) {
+            showToast('El archivo CSV está vacío', 'error');
+            return;
+          }
+          const parsed = results.data.map((raw) => {
+            const { parsed, errors } = parseRow(raw, categories, brands);
+            return { raw, parsed, errors: errors.filter(e => !e.includes('no encontrada')), status: 'pending' as const, errorMsg: undefined };
+          });
+          setRows(parsed);
+          setUploadedCount(0);
+          showToast(`${parsed.length} filas cargadas`, 'success');
+        },
+        error: () => showToast('Error al leer el archivo CSV', 'error'),
+      });
+    };
+    reader.readAsArrayBuffer(file);
   }, [categories, brands, showToast]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -317,6 +362,15 @@ export default function CargaMasivaPage() {
   const warnCount = rows.filter(r => r.parsed && r.errors.length > 0).length;
   const errorCount = rows.filter(r => !r.parsed).length;
 
+  const allActive = rows.every(r => !r.parsed || r.parsed.is_active);
+
+  const toggleAllActive = () => {
+    const next = !allActive;
+    setRows(prev => prev.map(r =>
+      r.parsed ? { ...r, parsed: { ...r.parsed, is_active: next } } : r
+    ));
+  };
+
   const toggleRow = (i: number) => {
     setExpandedRows(prev => {
       const next = new Set(prev);
@@ -391,6 +445,13 @@ export default function CargaMasivaPage() {
             )}
             <div className="ml-auto flex gap-2">
               <button
+                onClick={toggleAllActive}
+                disabled={uploading}
+                className="text-sm font-bold px-3 py-1.5 border rounded-xl transition-colors border-gray-200 text-gray-700 hover:bg-gray-50"
+              >
+                {allActive ? 'Desactivar todos' : 'Activar todos'}
+              </button>
+              <button
                 onClick={() => { setRows([]); setUploadedCount(0); }}
                 className="text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5 border border-gray-200 rounded-xl transition-colors"
                 disabled={uploading}
@@ -421,6 +482,7 @@ export default function CargaMasivaPage() {
                   <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">SKU</th>
                   <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Precio</th>
                   <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Variantes</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Activo</th>
                   <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Estado</th>
                   <th className="px-4 py-3 w-8"></th>
                 </tr>
@@ -440,6 +502,20 @@ export default function CargaMasivaPage() {
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-500">
                         {row.parsed?.variants.length ? `${row.parsed.variants.length} variante(s)` : '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        {row.parsed && row.status === 'pending' ? (
+                          <button
+                            onClick={() => setRows(prev => prev.map((r, idx) =>
+                              idx === i && r.parsed ? { ...r, parsed: { ...r.parsed, is_active: !r.parsed.is_active } } : r
+                            ))}
+                            className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${row.parsed.is_active ? 'bg-green-500' : 'bg-gray-200'}`}
+                          >
+                            <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform ${row.parsed.is_active ? 'translate-x-4' : 'translate-x-0'}`} />
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-400">—</span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         {row.status === 'uploading' && (
